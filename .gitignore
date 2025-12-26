@@ -1,0 +1,21 @@
+# --- Seguridad (CRÍTICO) ---
+.env
+.env.local
+# Si 'test_keys.py' tiene claves reales escritas en el código, descomenta la siguiente línea:
+test/
+
+# --- Python & Cache (Basura del sistema) ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Entornos Virtuales (No subir nunca, pesan demasiado) ---
+venv/
+env/
+.venv/
+
+# --- IDEs y Sistema Operativo (Opcional pero recomendado) ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

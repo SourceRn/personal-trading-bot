@@ -1,0 +1,9 @@
+version: '3.8'
+services:
+  trading-bot:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - ./database:/app/database
