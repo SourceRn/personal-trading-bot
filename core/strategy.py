@@ -3,11 +3,11 @@ import pandas_ta as ta
 
 class Strategy:
     def __init__(self, rsi_length=14, ema_length=50, 
-                 rsi_long_threshold=35, rsi_short_threshold=65, filter_ema=True):
+                 rsi_long_threshold=40, rsi_short_threshold=65, filter_ema=True):
         """
         Configuración Estándar:
-        - RSI Long < 30 (Sobreventa)
-        - RSI Short > 70 (Sobrecompra)
+        - RSI Long < 40 (Sobreventa)
+        - RSI Short > 65 (Sobrecompra)
         - Filter EMA = True (Operar solo a favor de la tendencia)
         """
         self.rsi_length = rsi_length
