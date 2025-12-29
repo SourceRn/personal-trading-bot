@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 class Settings:
-    SYMBOL = "BTC/USDT".replace("/", "")
-    TIMEFRAME = "1m"
+    SYMBOL = "SOL/USDT".replace("/", "")
+    TIMEFRAME = "5m"
     LEVERAGE = 5
     
     # GESTIÓN DE RIESGO
