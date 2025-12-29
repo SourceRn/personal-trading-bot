@@ -94,7 +94,15 @@ class RiskManager:
         return None
 
     def _normalize_quantity(self, quantity):
+        # Cargar mercados si no están cargados (vital para cambiar de moneda)
+        if not self.exchange.markets:
+            self.exchange.load_markets()
+            
         try:
+            # Usar la precisión específica de SOL/USDT definida por Binance
+            market = self.exchange.market(settings.SYMBOL)
             return self.exchange.amount_to_precision(settings.SYMBOL, quantity)
-        except:
-            return round(quantity, 3)
+        except Exception as e:
+            print(f"[RISK] Error normalizando cantidad: {e}")
+            # Fallback seguro: 2 decimales para SOL (usualmente acepta 2 o 3)
+            return round(quantity, 2)
