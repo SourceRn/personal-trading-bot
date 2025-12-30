@@ -1,54 +1,79 @@
 import pandas as pd
 import pandas_ta as ta
+from config.settings import settings
 
 class Strategy:
-    def __init__(self, rsi_length=14, ema_length=50, 
-                 rsi_long_threshold=45, rsi_short_threshold=55, filter_ema=True):
-        """
-        Configuración Estándar:
-        - RSI Long < 40 (Sobreventa)
-        - RSI Short > 65 (Sobrecompra)
-        - Filter EMA = True (Operar solo a favor de la tendencia)
-        """
-        self.rsi_length = rsi_length
-        self.ema_length = ema_length
-        self.rsi_long_threshold = rsi_long_threshold
-        self.rsi_short_threshold = rsi_short_threshold
-        self.filter_ema = filter_ema
+    def __init__(self):
+        pass
 
     def analyze(self, df):
-        # Calcular indicadores
-        df.ta.rsi(length=self.rsi_length, append=True)
-        df.ta.ema(length=self.ema_length, append=True)
+        """
+        Analiza el mercado y decide qué estrategia usar basado en el ADX.
+        Retorna: (Señal, Nombre_Estrategia)
+        Ejemplo: ("LONG", "EMA_CROSS") o (None, "RSI_RANGE")
+        """
+        # --- 1. CALCULO DE INDICADORES ---
+        # ADX (El Juez)
+        adx_df = df.ta.adx(length=settings.ADX_PERIOD)
+        if adx_df is None or adx_df.empty: return None, "WAITING_DATA"
         
-        # Obtener la última vela cerrada
-        last_row = df.iloc[-1]
+        # Asignamos el valor actual del ADX a la columna 'ADX' del df principal
+        df['ADX'] = adx_df[f'ADX_{settings.ADX_PERIOD}']
+
+        # EMAs para Cruce (Tendencia)
+        df['EMA_FAST'] = df.ta.ema(length=settings.EMA_FAST)
+        df['EMA_SLOW'] = df.ta.ema(length=settings.EMA_SLOW)
+
+        # Indicadores para Rango (RSI + EMA Filtro)
+        df['RSI'] = df.ta.rsi(length=settings.RSI_LENGTH)
+        df['EMA_FILTER'] = df.ta.ema(length=settings.RSI_EMA_FILTER)
+
+        # Limpieza de NaNs (necesario al inicio)
+        df.dropna(inplace=True)
+        if len(df) < 2: return None, "WAITING_DATA"
+
+        # Datos actuales y previos (para detectar cruces)
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        # --- 2. EL JUEZ: SELECCIÓN DE ESTRATEGIA ---
+        adx_value = last['ADX']
         
-        # Extraer valores
-        rsi_value = last_row[f'RSI_{self.rsi_length}']
-        ema_value = last_row[f'EMA_{self.ema_length}']
-        price_value = last_row['close']
-        
-        # Lógica de Señal LONG (Compra)
-        # 1. El RSI debe indicar que está "barato" (menor a 30)
-        long_condition = rsi_value < self.rsi_long_threshold
-        
-        # Lógica de Señal SHORT (Venta)
-        # 1. El RSI debe indicar que está "caro" (mayor a 70)
-        short_condition = rsi_value > self.rsi_short_threshold
-        
-        # Filtro de Tendencia (EMA)
-        if self.filter_ema:
-            # Para LONG: El precio debe estar POR ENCIMA de la EMA (Tendencia Alcista)
-            long_condition = long_condition and (price_value > ema_value)
-            
-            # Para SHORT: El precio debe estar POR DEBAJO de la EMA (Tendencia Bajista)
-            short_condition = short_condition and (price_value < ema_value)
-        
-        # Retorno de decisión
-        if long_condition:
+        if adx_value > settings.ADX_THRESHOLD:
+            # === MODO TENDENCIA (EMA CROSS) ===
+            strategy_name = f"TREND (ADX {adx_value:.1f})"
+            signal = self._check_ema_cross(last, prev)
+        else:
+            # === MODO RANGO (RSI + EMA) ===
+            strategy_name = f"RANGE (ADX {adx_value:.1f})"
+            signal = self._check_rsi_reversion(last)
+
+        return signal, strategy_name
+
+    def _check_ema_cross(self, last, prev):
+        """Estrategia 1: Cruce de EMAs"""
+        # Cruce Alcista (Golden Cross): Rápida cruza hacia arriba a la Lenta
+        if prev['EMA_FAST'] <= prev['EMA_SLOW'] and last['EMA_FAST'] > last['EMA_SLOW']:
             return "LONG"
-        elif short_condition:
-            return "SHORT"
         
+        # Cruce Bajista (Death Cross): Rápida cruza hacia abajo a la Lenta
+        if prev['EMA_FAST'] >= prev['EMA_SLOW'] and last['EMA_FAST'] < last['EMA_SLOW']:
+            return "SHORT"
+            
+        return None
+
+    def _check_rsi_reversion(self, last):
+        """Estrategia 2: Tu estrategia original (RSI + EMA Filter)"""
+        rsi = last['RSI']
+        price = last['close']
+        ema_filter = last['EMA_FILTER']
+
+        # Lógica LONG
+        if rsi < settings.RSI_LONG_THRESHOLD and price > ema_filter:
+            return "LONG"
+        
+        # Lógica SHORT
+        if rsi > settings.RSI_SHORT_THRESHOLD and price < ema_filter:
+            return "SHORT"
+            
         return None

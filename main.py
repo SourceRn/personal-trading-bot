@@ -8,7 +8,9 @@ from utils.telegram_bot import send_message
 from config.settings import settings
 
 def fetch_data(exchange, symbol, timeframe):
-    bars = exchange.fetch_ohlcv(symbol, timeframe, limit=100)
+    # CAMBIO CRITICO: Aumentamos limit de 100 a 300.
+    # El ADX y las EMAs necesitan más historia para estabilizarse.
+    bars = exchange.fetch_ohlcv(symbol, timeframe, limit=300)
     df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     return df
 
@@ -32,6 +34,7 @@ def run_bot():
     startup_msg = (f"🤖 Protocol Zero-Emotion Started\n"
                    f"Symbol: {settings.SYMBOL}\n"
                    f"Mode: {mode_label}\n"
+                   f"Strategy: Hybrid (ADX Switcher)\n"
                    f"Daily Loss Limit: -{max_loss_usdt:.2f} USDT")
     print(startup_msg)
     send_message(startup_msg)
@@ -49,12 +52,13 @@ def run_bot():
 
             # 1. Obtener datos
             df = fetch_data(exchange, settings.SYMBOL, settings.TIMEFRAME)
-            signal = strategy.analyze(df) 
+            
+            # --- CAMBIO IMPORTANTE AQUÍ ---
+            # Ahora analyze devuelve dos valores: la señal y el nombre de la estrategia usada
+            signal, strategy_name = strategy.analyze(df) 
+            
             current_price = df.iloc[-1]['close']
             
-            # RSI Seguro
-            current_rsi = df.iloc[-1]['RSI_14'] if 'RSI_14' in df.columns else 0.0
-
             # 2. GESTIÓN DE POSICIONES
             in_position = False
 
@@ -65,7 +69,7 @@ def run_bot():
                     print(f"[GUARD] Posición LIVE detectada. Qty: {qty}. Esperando salida...")
             
             else:
-                # DRY RUN
+                # DRY RUN LOGIC
                 if dry_run_position:
                     in_position = True
                     entry = dry_run_position['entry']
@@ -103,21 +107,23 @@ def run_bot():
                         dry_run_position = None 
                         in_position = False
 
-                        # --- AQUÍ AGREGAS EL COOLDOWN ---
+                        # COOLDOWN
                         print("[COOLDOWN] ❄️ Enfriando motores por 5 minutos para evitar re-entrada...")
-                        time.sleep(300) # 300 segundos = 5 minutos
+                        time.sleep(300) 
 
-            # 3. Telemetría
+            # 3. Telemetría Mejorada
             status_msg = "EN POSICIÓN" if in_position else "BUSCANDO"
+            
+            # Formato de log más informativo
             print(f"[{pd.Timestamp.now().strftime('%H:%M:%S')}] "
                   f"Mode: {'LIVE' if settings.IS_LIVE else 'DRY'} | "
+                  f"Strat: {strategy_name} | "  # Muestra si es TREND o RANGE
                   f"Price: {current_price:.2f} | "
-                  f"PnL Day: {daily_pnl:.2f} | "
                   f"Status: {status_msg}")
 
             # 4. Ejecución
             if not in_position and signal:
-                print(f"!!! SIGNAL DETECTED: {signal} !!!")
+                print(f"!!! SIGNAL DETECTED: {signal} via {strategy_name} !!!")
                 
                 order_result = risk_manager.calculate_and_execute(
                     signal=signal, 
@@ -146,7 +152,7 @@ def run_bot():
                         side_emoji = "🔴"
 
                     msg = (
-                        f"{side_emoji} ORDEN EJECUTADA ({'LIVE' if settings.IS_LIVE else 'SIM'})\n"
+                        f"{side_emoji} ORDEN EJECUTADA ({'LIVE' if settings.IS_LIVE else 'SIM'}) via {strategy_name}\n"
                         f"-----------------------------\n"
                         f"Par: {settings.SYMBOL}\n"
                         f"Tipo: {signal} {settings.LEVERAGE}x\n"

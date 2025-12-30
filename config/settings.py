@@ -9,20 +9,31 @@ class Settings:
     LEVERAGE = 5
     
     # GESTIÓN DE RIESGO
-    RISK_PER_TRADE = 0.02   # SUGERENCIA: Sube a 2% ($0.40) para que el bot tenga holgura.
-                            # Con 1% ($0.20) es seguro, pero con 2% ($0.40) cubres mejor las comisiones.
-    
-    MAX_DAILY_LOSS = 0.10   # 10% ($2.00). Si pierdes $2 en un día, para.
-                            # Con una cuenta tan chica, un stop loss diario de 2% ($0.40) es muy estricto (una sola mala operación te detiene).
+    RISK_PER_TRADE = 0.02   
+    MAX_DAILY_LOSS = 0.10   
 
     # --- ESTRATEGIA DE SALIDA ---
-    # Cambia estos valores para ajustar la estrategia globalmente
-    STOP_LOSS_PCT = 0.01     # 1%
-    TAKE_PROFIT_PCT = 0.02   # 2%
+    STOP_LOSS_PCT = 0.01     
+    TAKE_PROFIT_PCT = 0.02   
 
+    # --- CONFIGURACIÓN ESTRATEGIAS ---
+    # 1. El Juez (Selector)
+    ADX_PERIOD = 14
+    ADX_THRESHOLD = 25  # >25 = Tendencia, <25 = Rango
+
+    # 2. Estrategia Tendencia (EMA Cross)
+    EMA_FAST = 9
+    EMA_SLOW = 21
+
+    # 3. Estrategia Rango (Tu actual RSI + EMA)
+    RSI_LENGTH = 14
+    RSI_EMA_FILTER = 50 # EMA para filtrar dirección en estrategia RSI
+    RSI_LONG_THRESHOLD = 45
+    RSI_SHORT_THRESHOLD = 55
+
+    # ... (Resto de tus credenciales Telegram/API sin cambios) ...
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
     TRADING_MODE = os.getenv("TRADING_MODE", "dry_run").upper()
 
     @property
