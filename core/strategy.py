@@ -4,7 +4,8 @@ from config.settings import settings
 
 class Strategy:
     def __init__(self):
-        pass
+        # Inicializamos en RANGE por seguridad (más conservador al inicio)
+        self.current_mode = "RANGE"
 
     def analyze(self, df):
         """
@@ -36,10 +37,24 @@ class Strategy:
         last = df.iloc[-1]
         prev = df.iloc[-2]
 
-        # --- 2. EL JUEZ: SELECCIÓN DE ESTRATEGIA ---
+        # --- 2. EL JUEZ: SELECCIÓN DE ESTRATEGIA CON HISTÉRESIS ---
         adx_value = last['ADX']
         
-        if adx_value > settings.ADX_THRESHOLD:
+        # Lógica de Histéresis (Buffer de 5 puntos para evitar parpadeo)
+        # Solo cambiamos a TREND si el ADX rompe con fuerza hacia arriba
+        if adx_value >= settings.ADX_THRESHOLD:
+            self.current_mode = "TREND"
+        
+        # Solo regresamos a RANGE si el ADX se debilita claramente (Threshold - 5)
+        # Ejemplo: Si umbral es 25, debe bajar de 20 para volver a Range.
+        elif adx_value < (settings.ADX_THRESHOLD - 5):
+            self.current_mode = "RANGE"
+            
+        # NOTA: Si el ADX está entre 20 y 25, self.current_mode NO cambia.
+        # Esto elimina el ruido cuando el ADX oscila (24.9 -> 25.1 -> 24.8).
+
+        # --- 3. EJECUCIÓN DE LA ESTRATEGIA ACTIVA ---
+        if self.current_mode == "TREND":
             # === MODO TENDENCIA (EMA CROSS) ===
             strategy_name = f"TREND (ADX {adx_value:.1f})"
             signal = self._check_ema_cross(last, prev)

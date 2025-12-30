@@ -68,13 +68,19 @@ def run_bot():
             signal, strategy_name = strategy.analyze(df) 
             current_price = df.iloc[-1]['close']
             
-            # --- NUEVO: DETECCIÓN CAMBIO DE ESTRATEGIA ---
-            if strategy_name != last_strategy_name:
+            # --- CORRECCIÓN: DETECCIÓN CAMBIO DE ESTRATEGIA INTELIGENTE ---
+            # Extraemos solo la primera palabra (TREND o RANGE) para comparar
+            current_strat_base = strategy_name.split(" ")[0]
+            last_strat_base = last_strategy_name.split(" ")[0]
+
+            if current_strat_base != last_strat_base:
                 strat_msg = (f"🔄 <b>Cambio de Estrategia Detectado</b>\n"
                              f"Anterior: {last_strategy_name}\n"
                              f"Actual: <b>{strategy_name}</b>")
                 send_message(strat_msg)
-                last_strategy_name = strategy_name
+                
+            # Siempre actualizamos el nombre completo para el siguiente ciclo
+            last_strategy_name = strategy_name
             # ---------------------------------------------
             
             # 2. GESTIÓN DE POSICIONES
