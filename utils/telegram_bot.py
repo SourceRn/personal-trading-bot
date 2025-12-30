@@ -8,9 +8,12 @@ def send_message(message):
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": settings.TELEGRAM_CHAT_ID,
-        "text": message
+        "text": message,
+        "parse_mode": "HTML"  # <--- CAMBIO IMPORTANTE
     }
     try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception:
-        pass
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code != 200:
+            print(f"❌ ERROR TELEGRAM: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"❌ ERROR CONEXIÓN TELEGRAM: {e}")

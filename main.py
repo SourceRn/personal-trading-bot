@@ -8,8 +8,6 @@ from utils.telegram_bot import send_message
 from config.settings import settings
 
 def fetch_data(exchange, symbol, timeframe):
-    # CAMBIO CRITICO: Aumentamos limit de 100 a 300.
-    # El ADX y las EMAs necesitan más historia para estabilizarse.
     bars = exchange.fetch_ohlcv(symbol, timeframe, limit=300)
     df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     return df
@@ -24,49 +22,107 @@ def run_bot():
     
     dry_run_position = None 
     
-    # --- CONTROL DE PÉRDIDA DIARIA (CIRCUIT BREAKER) ---
+    # --- VARIABLES DE ESTADO PARA NOTIFICACIONES ---
+    last_strategy_name = "INICIANDO..."
+    tp_alert_sent = False
+    sl_alert_sent = False
+    
+    # Variables para rastrear TP/SL actuales (Para alertas de proximidad)
+    active_tp_price = 0.0
+    active_sl_price = 0.0
+    # -----------------------------------------------
+
     daily_pnl = 0.0
-    # Calculamos cuánto es el monto máximo de pérdida en USDT
     initial_balance = risk_manager._get_available_balance()
     max_loss_usdt = initial_balance * settings.MAX_DAILY_LOSS
     
     mode_label = "🚨 LIVE TRADING 🚨" if settings.IS_LIVE else "DRY RUN (Paper Trading)"
-    startup_msg = (f"🤖 Protocol Zero-Emotion Started\n"
-                   f"Symbol: {settings.SYMBOL}\n"
-                   f"Mode: {mode_label}\n"
-                   f"Strategy: Hybrid (ADX Switcher)\n"
+    
+    # MENSAJE DE INICIO CON HTML
+    startup_msg = (f"🤖 <b>Protocol Zero-Emotion Started</b>\n"
+                   f"Symbol: <code>{settings.SYMBOL}</code>\n"
+                   f"Mode: <b>{mode_label}</b>\n"
                    f"Daily Loss Limit: -{max_loss_usdt:.2f} USDT")
     print(startup_msg)
     send_message(startup_msg)
 
-    while True:
-        try:
+    # BLOQUE TRY...FINALLY PARA CAPTURAR APAGADO
+    try:
+        while True:
             # 0. VERIFICACIÓN DE SEGURIDAD DIARIA
             if daily_pnl <= -max_loss_usdt:
-                stop_msg = (f"⛔ BOT DETENIDO: Límite de pérdida diaria alcanzado.\n"
-                            f"PnL Hoy: {daily_pnl:.2f} USDT\n"
-                            f"Límite: -{max_loss_usdt:.2f} USDT")
+                stop_msg = (f"⛔ <b>BOT DETENIDO</b>: Límite de pérdida diaria alcanzado.\n"
+                            f"PnL Hoy: {daily_pnl:.2f} USDT")
                 print(stop_msg)
                 send_message(stop_msg)
-                break # Rompe el ciclo while y apaga el bot
+                break 
 
             # 1. Obtener datos
-            df = fetch_data(exchange, settings.SYMBOL, settings.TIMEFRAME)
-            
-            # --- CAMBIO IMPORTANTE AQUÍ ---
-            # Ahora analyze devuelve dos valores: la señal y el nombre de la estrategia usada
+            try:
+                df = fetch_data(exchange, settings.SYMBOL, settings.TIMEFRAME)
+            except Exception as e:
+                print(f"Error fetching data: {e}")
+                time.sleep(10)
+                continue
+
             signal, strategy_name = strategy.analyze(df) 
-            
             current_price = df.iloc[-1]['close']
+            
+            # --- NUEVO: DETECCIÓN CAMBIO DE ESTRATEGIA ---
+            if strategy_name != last_strategy_name:
+                strat_msg = (f"🔄 <b>Cambio de Estrategia Detectado</b>\n"
+                             f"Anterior: {last_strategy_name}\n"
+                             f"Actual: <b>{strategy_name}</b>")
+                send_message(strat_msg)
+                last_strategy_name = strategy_name
+            # ---------------------------------------------
             
             # 2. GESTIÓN DE POSICIONES
             in_position = False
 
             if settings.IS_LIVE:
-                qty = execution_engine.check_active_position(settings.SYMBOL)
-                if abs(qty) > 0:
+                position_data = execution_engine.get_position_details(settings.SYMBOL)
+                
+                if position_data and float(position_data['amt']) != 0:
                     in_position = True
-                    print(f"[GUARD] Posición LIVE detectada. Qty: {qty}. Esperando salida...")
+                    qty = float(position_data['amt'])
+                    entry_price = float(position_data['entryPrice'])
+                    side = 'buy' if qty > 0 else 'sell'
+                    
+                    # Si acabamos de detectar posición y no tenemos SL/TP guardados en memoria, los estimamos
+                    # (Esto es una recuperación simple, lo ideal es leer las órdenes abiertas de la API)
+                    if active_tp_price == 0: 
+                        tp_factor = (1 + settings.TAKE_PROFIT_PCT) if side == 'buy' else (1 - settings.TAKE_PROFIT_PCT)
+                        sl_factor = (1 - settings.STOP_LOSS_PCT) if side == 'buy' else (1 + settings.STOP_LOSS_PCT)
+                        active_tp_price = entry_price * tp_factor
+                        active_sl_price = entry_price * sl_factor
+
+                    # --- TRAILING STOP LOGIC (LIVE) ---
+                    # (Tu lógica original de trailing live aquí...)
+                    should_update = False
+                    new_sl_price = 0.0
+                    
+                    if side == 'buy':
+                        pnl_pct = (current_price - entry_price) / entry_price
+                        if pnl_pct >= settings.TRAILING_TRIGGER:
+                            target_sl = entry_price * (1 + settings.TRAILING_STEP)
+                            if target_sl > entry_price: 
+                                new_sl_price = target_sl
+                                should_update = True
+                    elif side == 'sell':
+                        pnl_pct = (entry_price - current_price) / entry_price
+                        if pnl_pct >= settings.TRAILING_TRIGGER:
+                            target_sl = entry_price * (1 - settings.TRAILING_STEP)
+                            if target_sl < entry_price:
+                                new_sl_price = target_sl
+                                should_update = True
+                    
+                    if should_update:
+                        success = execution_engine.update_trailing_stop(settings.SYMBOL, new_sl_price, side)
+                        if success:
+                            # Nota: El mensaje se envía dentro de execution_engine ahora
+                            active_sl_price = new_sl_price # Actualizamos memoria local
+                            time.sleep(5) 
             
             else:
                 # DRY RUN LOGIC
@@ -78,6 +134,37 @@ def run_bot():
                     side = dry_run_position['side']
                     qty_held = dry_run_position.get('qty', 0.0)
                     
+                    # Actualizar memoria local para alertas
+                    active_sl_price = sl
+                    active_tp_price = tp
+
+                    # --- TRAILING STOP LOGIC (DRY RUN) ---
+                    new_sl = None
+                    sl_changed = False
+
+                    if side == 'buy':
+                        pnl_pct = (current_price - entry) / entry
+                        if pnl_pct >= settings.TRAILING_TRIGGER:
+                            target_sl = entry * (1 + settings.TRAILING_STEP)
+                            if sl < target_sl:
+                                new_sl = target_sl
+                                sl_changed = True
+                    elif side == 'sell':
+                        pnl_pct = (entry - current_price) / entry
+                        if pnl_pct >= settings.TRAILING_TRIGGER:
+                            target_sl = entry * (1 - settings.TRAILING_STEP)
+                            if sl > target_sl:
+                                new_sl = target_sl
+                                sl_changed = True
+                    
+                    if sl_changed and new_sl:
+                        dry_run_position['sl'] = new_sl
+                        active_sl_price = new_sl # Actualizar referencia
+                        print(f"🛡️ TRAILING STOP ACTIVADO! SL movido a {new_sl:.2f}")
+                        send_message(f"🛡️ <b>SL ACTUALIZADO</b> a <code>{new_sl:.2f}</code> (Trailing)")
+                        sl = new_sl 
+
+                    # CIERRE DE POSICION (DRY RUN)
                     close_signal = None
                     if side == 'buy':
                         if current_price <= sl: close_signal = "STOP LOSS"
@@ -87,41 +174,62 @@ def run_bot():
                         elif current_price <= tp: close_signal = "TAKE PROFIT"
                     
                     if close_signal:
-                        # CALCULO DE PnL REALISTA
                         price_diff = (current_price - entry) if side == 'buy' else (entry - current_price)
                         realized_pnl = price_diff * qty_held
-                        
-                        # Actualizamos el PnL Diario
                         daily_pnl += realized_pnl
                         
                         emoji = "✅" if realized_pnl > 0 else "❌"
-                        msg = (f"{emoji} Posición CERRADA ({close_signal})\n"
-                               f"-----------------------------\n"
-                               f"PnL Operación: {realized_pnl:.4f} USDT\n"
+                        msg = (f"{emoji} <b>Posición CERRADA</b> ({close_signal})\n"
+                               f"PnL Operación: <b>{realized_pnl:.4f} USDT</b>\n"
                                f"📉 PnL Diario: {daily_pnl:.4f} USDT\n"
                                f"Precio Cierre: {current_price}")
-                               
+                        
                         send_message(msg)
                         print(f"[SIMULATION] {msg}")
                         
                         dry_run_position = None 
                         in_position = False
+                        
+                        # Resetear alertas al cerrar
+                        active_sl_price = 0.0
+                        active_tp_price = 0.0
+                        tp_alert_sent = False
+                        sl_alert_sent = False
 
-                        # COOLDOWN
-                        print("[COOLDOWN] ❄️ Enfriando motores por 5 minutos para evitar re-entrada...")
+                        print("[COOLDOWN] ❄️ Enfriando motores por 5 minutos...")
                         time.sleep(300) 
 
-            # 3. Telemetría Mejorada
-            status_msg = "EN POSICIÓN" if in_position else "BUSCANDO"
-            
-            # Formato de log más informativo
-            print(f"[{pd.Timestamp.now().strftime('%H:%M:%S')}] "
-                  f"Mode: {'LIVE' if settings.IS_LIVE else 'DRY'} | "
-                  f"Strat: {strategy_name} | "  # Muestra si es TREND o RANGE
-                  f"Price: {current_price:.2f} | "
-                  f"Status: {status_msg}")
+            # --- NUEVO: LOGICA DE ALERTAS DE PROXIMIDAD ---
+            if in_position and active_tp_price > 0 and active_sl_price > 0:
+                # Calcular distancia porcentual
+                dist_tp = abs(active_tp_price - current_price) / current_price
+                dist_sl = abs(current_price - active_sl_price) / current_price
+                
+                # Alerta TP
+                if dist_tp <= settings.ALERT_PROXIMITY_PCT and not tp_alert_sent:
+                    send_message(f"🚀 <b>Precio cerca del TAKE PROFIT</b>\n"
+                                 f"Distancia: {dist_tp*100:.2f}%\n"
+                                 f"Actual: {current_price} -> TP: {active_tp_price:.2f}")
+                    tp_alert_sent = True
+                
+                # Alerta SL
+                if dist_sl <= settings.ALERT_PROXIMITY_PCT and not sl_alert_sent:
+                    send_message(f"⚠️ <b>Precio cerca del STOP LOSS</b>\n"
+                                 f"Distancia: {dist_sl*100:.2f}%\n"
+                                 f"Actual: {current_price} -> SL: {active_sl_price:.2f}")
+                    sl_alert_sent = True
+            else:
+                # Si no hay posición, reseteamos flags
+                tp_alert_sent = False
+                sl_alert_sent = False
+            # ---------------------------------------------
 
-            # 4. Ejecución
+            # 3. Telemetría
+            status_msg = "EN POSICIÓN" if in_position else "BUSCANDO"
+            print(f"[{pd.Timestamp.now().strftime('%H:%M:%S')}] "
+                  f"Strat: {strategy_name} | Price: {current_price:.2f} | {status_msg}")
+
+            # 4. Ejecución (Entrada)
             if not in_position and signal:
                 print(f"!!! SIGNAL DETECTED: {signal} via {strategy_name} !!!")
                 
@@ -135,7 +243,6 @@ def run_bot():
                 if order_result:
                     exec_price = float(order_result.get('average', current_price))
                     quantity = float(order_result.get('amount', 0))
-                    
                     position_notional = quantity * exec_price
                     margin_used = position_notional / settings.LEVERAGE
 
@@ -150,17 +257,18 @@ def run_bot():
                         sl_price = exec_price * (1 + sl_pct)
                         tp_price = exec_price * (1 - tp_pct)
                         side_emoji = "🔴"
+                    
+                    # Guardamos precios para alertas
+                    active_sl_price = sl_price
+                    active_tp_price = tp_price
 
                     msg = (
-                        f"{side_emoji} ORDEN EJECUTADA ({'LIVE' if settings.IS_LIVE else 'SIM'}) via {strategy_name}\n"
-                        f"-----------------------------\n"
-                        f"Par: {settings.SYMBOL}\n"
-                        f"Tipo: {signal} {settings.LEVERAGE}x\n"
+                        f"{side_emoji} <b>ORDEN EJECUTADA</b> ({'LIVE' if settings.IS_LIVE else 'SIM'}) via {strategy_name}\n"
+                        f"Par: <b>{settings.SYMBOL}</b>\n"
+                        f"Tipo: <b>{signal}</b> {settings.LEVERAGE}x\n"
                         f"💵 Entrada: ${exec_price:,.2f}\n"
                         f"📉 SL: ${sl_price:,.2f}\n"
                         f"🎯 TP: ${tp_price:,.2f}\n"
-                        f"-----------------------------\n"
-                        f"⚖️ Tamaño: ${position_notional:,.2f}\n"
                         f"💰 Margen: ${margin_used:,.2f}"
                     )
                     send_message(msg)
@@ -176,9 +284,13 @@ def run_bot():
 
             time.sleep(60) 
             
-        except Exception as e:
-            print(f"CRITICAL LOOP ERROR: {e}")
-            time.sleep(60)
+    except KeyboardInterrupt:
+        send_message("⚠️ <b>Bot detenido manualmente</b> (Ctrl+C)")
+    except Exception as e:
+        send_message(f"🚨 <b>ERROR CRÍTICO DEL SISTEMA:</b>\n<code>{str(e)}</code>")
+        print(f"CRITICAL ERROR: {e}")
+    finally:
+        send_message("🛑 <b>Protocol Zero-Emotion APAGADO</b>")
 
 if __name__ == "__main__":
     run_bot()

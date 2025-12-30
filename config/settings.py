@@ -12,26 +12,31 @@ class Settings:
     RISK_PER_TRADE = 0.02   
     MAX_DAILY_LOSS = 0.10   
 
+    # --- NUEVO: TRAILING STOP ---
+    TRAILING_TRIGGER = 0.01  
+    TRAILING_STEP = 0.005    
+
+    # --- NUEVO: ALERTAS ---
+    # Avisar si el precio está a un 0.2% de distancia del TP o SL
+    ALERT_PROXIMITY_PCT = 0.002 
+
     # --- ESTRATEGIA DE SALIDA ---
     STOP_LOSS_PCT = 0.01     
     TAKE_PROFIT_PCT = 0.02   
 
     # --- CONFIGURACIÓN ESTRATEGIAS ---
-    # 1. El Juez (Selector)
     ADX_PERIOD = 14
-    ADX_THRESHOLD = 25  # >25 = Tendencia, <25 = Rango
+    ADX_THRESHOLD = 25  
 
-    # 2. Estrategia Tendencia (EMA Cross)
     EMA_FAST = 9
     EMA_SLOW = 21
 
-    # 3. Estrategia Rango (Tu actual RSI + EMA)
     RSI_LENGTH = 14
-    RSI_EMA_FILTER = 50 # EMA para filtrar dirección en estrategia RSI
-    RSI_LONG_THRESHOLD = 45
-    RSI_SHORT_THRESHOLD = 55
+    RSI_EMA_FILTER = 50 
+    RSI_LONG_THRESHOLD = 40
+    RSI_SHORT_THRESHOLD = 65
 
-    # ... (Resto de tus credenciales Telegram/API sin cambios) ...
+    # ... Credenciales ...
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     TRADING_MODE = os.getenv("TRADING_MODE", "dry_run").upper()
