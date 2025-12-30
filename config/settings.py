@@ -7,55 +7,59 @@ class Settings:
     # --- CONFIGURACIÓN PRINCIPAL ---
     SYMBOL = "SOL/USDT".replace("/", "")
     
-    # Mantenemos 1h: Es el equilibrio perfecto entre ruido y tendencia para Day Trading
+    # TIMEFRAME 1H: El rey del Day Trading (menos ruido, señales claras)
     TIMEFRAME = "1h" 
     
-    # APALANCAMIENTO CONSERVADOR
-    # Con un Stop Loss del 1.8%, usar 5x es el límite máximo seguro (1.8% * 5 = 9% riesgo)
-    # Recomendación: Empieza con 3x o 4x.
+    # APALANCAMIENTO
+    # 4x es el punto dulce para SL de ~2%. Riesgo controlado.
     LEVERAGE = 4 
     
-    # GESTIÓN DE RIESGO
+    # GESTIÓN DE RIESGO CAPITAL
     RISK_PER_TRADE = 0.02   # 2% de tu cuenta por operación
-    MAX_DAILY_LOSS = 0.06   # Si pierdes 6% en un día, se apaga (protección más estricta)
+    MAX_DAILY_LOSS = 0.06   # Circuit Breaker al 6% de pérdida diaria
 
-    # --- TRAILING STOP (DINÁMICA INTELIGENTE) ---
-    # ACTIVACIÓN TEMPRANA:
-    # No esperamos al 2%. Si ya ganamos un 1.5%, activamos el seguro.
-    TRAILING_TRIGGER = 0.015  # 1.5%
+    # --- GESTIÓN DINÁMICA DE ESTRATEGIAS (SOLUCIÓN "SÁBANA CORTA") ---
     
-    # ESPACIO AJUSTADO:
-    # Si el precio retrocede 0.5%, cerramos. Aseguramos la ganancia rápido.
-    TRAILING_STEP = 0.005     # 0.5%
+    # MODO RANGO (RSI): "Golpea y corre"
+    # Buscamos entrar en reversiones y salir rápido.
+    RANGE_TP = 0.025  # 2.5% Ganancia
+    RANGE_SL = 0.015  # 1.5% Pérdida
+
+    # MODO TENDENCIA (EMA): "Surfea la ola"
+    # Damos espacio para que el precio corra.
+    TREND_TP = 0.05   # 5.0% Ganancia
+    TREND_SL = 0.025  # 2.5% Pérdida (Más amplio para aguantar volatilidad)
+
+    # VALORES POR DEFECTO (Respaldo)
+    STOP_LOSS_PCT = 0.018
+    TAKE_PROFIT_PCT = 0.03
+
+    # --- TRAILING STOP ---
+    # Activamos el seguro cuando ganamos 1.5%
+    TRAILING_TRIGGER = 0.015 
+    # Dejamos 0.5% de espacio
+    TRAILING_STEP = 0.005     
 
     # --- ALERTAS ---
     ALERT_PROXIMITY_PCT = 0.003 
 
-    # --- ESTRATEGIA DE SALIDA (Realista) ---
-    # STOP LOSS TÉCNICO:
-    # En 1h, un 1.8% suele quedar por debajo del mínimo de la vela anterior.
-    # Es suficiente para respirar, pero corta las pérdidas rápido si falla.
-    STOP_LOSS_PCT = 0.018    # 1.8% 
-    
-    # TAKE PROFIT ALCANZABLE:
-    # Un movimiento del 3% en SOL es muy común en un día volátil.
-    # Es mucho más fácil tocar el 3% que el 6%.
-    TAKE_PROFIT_PCT = 0.03   # 3.0% (Ratio 1:1.6 aprox)
-
-    # --- CONFIGURACIÓN ESTRATEGIAS ---
+    # --- CONFIGURACIÓN TÉCNICA ESTRATEGIAS ---
+    # 1. El Juez (ADX)
     ADX_PERIOD = 14
-    ADX_THRESHOLD = 25 
+    # Subimos a 30 para que el Rango tenga prioridad y no se corte antes de tiempo
+    ADX_THRESHOLD = 30 
 
+    # 2. Tendencia (EMA)
     EMA_FAST = 9
     EMA_SLOW = 21
 
+    # 3. Rango (RSI)
     RSI_LENGTH = 14
     RSI_EMA_FILTER = 50 
     
-    # Filtros RSI
-    # Mantenemos la exigencia alta para no operar en ruido.
-    RSI_LONG_THRESHOLD = 30  
-    RSI_SHORT_THRESHOLD = 70 
+    # Umbrales optimizados para 1H (Entrada temprana)
+    RSI_LONG_THRESHOLD = 35  
+    RSI_SHORT_THRESHOLD = 65 
 
     # --- CREDENCIALES ---
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
