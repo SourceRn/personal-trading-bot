@@ -14,7 +14,6 @@ def start_telegram_listener():
     bot = telebot.TeleBot(settings.TELEGRAM_TOKEN)
     print("👂 Telegram Command Listener Iniciado...")
 
-    # -------------------------------------------
     def start_telegram_listener():
         if not settings.TELEGRAM_TOKEN:
             print("⚠️ No Telegram Token found for Listener")
@@ -36,7 +35,7 @@ def start_telegram_listener():
             print(f"⚠️ No se pudo configurar el menú: {e}")
     # -------------------------------------------
 
-    print("👂 Telegram Command Listener Iniciado...")
+        print("👂 Telegram Command Listener Iniciado...")
 
     # --- COMANDO /STATUS ---
     @bot.message_handler(commands=['status', 'bot'])
