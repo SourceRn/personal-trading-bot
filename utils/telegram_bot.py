@@ -12,7 +12,7 @@ def send_message(message):
         "parse_mode": "HTML"  # <--- CAMBIO IMPORTANTE
     }
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=30)
         if response.status_code != 200:
             print(f"❌ ERROR TELEGRAM: {response.status_code} - {response.text}")
     except Exception as e:

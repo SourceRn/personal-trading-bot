@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from config.settings import settings
 from core.shared_state import bot_state
+from telebot import types
 
 def start_telegram_listener():
     if not settings.TELEGRAM_TOKEN:
@@ -11,6 +12,30 @@ def start_telegram_listener():
         return
 
     bot = telebot.TeleBot(settings.TELEGRAM_TOKEN)
+    print("👂 Telegram Command Listener Iniciado...")
+
+    # -------------------------------------------
+    def start_telegram_listener():
+    if not settings.TELEGRAM_TOKEN:
+        print("⚠️ No Telegram Token found for Listener")
+        return
+
+    bot = telebot.TeleBot(settings.TELEGRAM_TOKEN)
+
+    # --- CONFIGURACIÓN DEL MENÚ DE COMANDOS ---
+    print("⚙️ Configurando menú de comandos en Telegram...")
+    try:
+        bot.set_my_commands([
+            types.BotCommand("status", "📊 Estado del sistema y uptime"),
+            types.BotCommand("balance", "💰 Ver saldo y PnL diario"),
+            types.BotCommand("posicion", "🟢 Ver operación activa"),
+            types.BotCommand("scan", "🔍 Escanear mercado (RSI/ADX)"),
+            types.BotCommand("stop", "🛑 Apagado de emergencia")
+        ])
+    except Exception as e:
+        print(f"⚠️ No se pudo configurar el menú: {e}")
+    # -------------------------------------------
+
     print("👂 Telegram Command Listener Iniciado...")
 
     # --- COMANDO /STATUS ---
