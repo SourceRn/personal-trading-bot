@@ -9,12 +9,10 @@ class ExecutionEngine:
     def place_entry_order(self, symbol, side, quantity, price=None):
         """
         Ejecuta una orden de mercado para entrar en posición.
-        Maneja tanto modo LIVE como simulación (Dry Run).
         """
         print(f"--- ORDER REQUEST ({settings.TRADING_MODE}) ---")
         print(f"Side: {side} | Qty: {quantity} | Symbol: {symbol}")
 
-        # --- MODO SIMULACIÓN ---
         if not settings.IS_LIVE:
             return {
                 'id': f'sim_{os.urandom(4).hex()}',
@@ -25,7 +23,6 @@ class ExecutionEngine:
                 'amount': quantity
             }
 
-        # --- MODO REAL ---
         try:
             order = self.exchange.create_order(
                 symbol=symbol,
@@ -36,21 +33,19 @@ class ExecutionEngine:
             print(f"✅ Order Executed: {order['id']}")
             return order
         except Exception as e:
-            error_msg = f"❌ EXECUTION ERROR: {str(e)}"
-            print(error_msg)
-            send_message(f"🚨 <b>Error de Ejecución:</b>\n{str(e)}")
+            msg = f"❌ EXECUTION ERROR: {str(e)}"
+            print(msg)
+            send_message(msg)
             return None
 
     def place_oco_orders(self, symbol, side, quantity, entry_price, sl_price, tp_price):
         """
         Coloca Stop Loss y Take Profit iniciales.
-        En Binance Futures, esto se hace enviando dos órdenes condicionales separadas.
         """
         if not settings.IS_LIVE:
-            return # En simulacion lo maneja el main loop
+            return
 
         try:
-            # Definir lado opuesto para cerrar
             close_side = 'sell' if side == 'buy' else 'buy'
             
             # 1. STOP LOSS
@@ -59,7 +54,7 @@ class ExecutionEngine:
                 symbol=symbol,
                 type='STOP_MARKET',
                 side=close_side,
-                amount=None, # closePosition=True no requiere monto
+                amount=None,
                 price=None,
                 params=sl_params
             )
@@ -79,17 +74,12 @@ class ExecutionEngine:
             
         except Exception as e:
             print(f"⚠️ Error colocando OCO (SL/TP): {e}")
-            send_message(f"⚠️ <b>Advertencia:</b> SL/TP no se pudieron colocar automáticamente.\n{str(e)}")
+            send_message(f"⚠️ <b>Advertencia SL/TP:</b>\n{str(e)}")
 
     def check_active_position(self, symbol):
-        """
-        Verifica si hay una posición abierta consultando el saldo de la moneda.
-        """
         if not settings.IS_LIVE:
             return False
-
         try:
-            # Obtenemos detalles completos
             pos = self.get_position_details(symbol)
             if pos and float(pos['amt']) != 0:
                 return True
@@ -99,61 +89,51 @@ class ExecutionEngine:
 
     def get_position_details(self, symbol):
         """
-        Obtiene los detalles de la posición actual (Tamaño, Precio Entrada).
-        Incluye depuración para arreglar el problema del nombre del símbolo.
+        Obtiene los detalles de la posición actual con NORMALIZACIÓN AGRESIVA.
+        Resuelve el problema de 'SOLUSDT' vs 'SOL/USDT:USDT'.
         """
         if not settings.IS_LIVE:
             return None
 
         try:
-            # Obtenemos TODAS las posiciones de riesgo del usuario
-            # Usamos fetch_positions sin argumentos para ver todo lo que hay
+            # Pedimos TODO a Binance
             all_positions = self.exchange.fetch_positions()
-            
-            # --- BLOQUE DE DEPURACIÓN (TEMPORAL) ---
-            # Esto imprimirá en el log qué símbolos está viendo realmente el bot
-            # Solo imprime si encuentra posiciones abiertas para no saturar
-            # ---------------------------------------
-            
             target_position = None
 
+            # --- FUNCIÓN DE LIMPIEZA (FILTRO NUCLEAR) ---
+            # Convierte "SOL/USDT:USDT" -> "SOLUSDT"
+            # Convierte "SOL/USDT" -> "SOLUSDT"
+            def clean_symbol(s):
+                if not s: return ""
+                return s.replace("/", "").split(":")[0]
+            # --------------------------------------------
+
+            # Limpiamos el símbolo que buscamos (el de settings)
+            target_clean = clean_symbol(symbol)
+
             for p in all_positions:
-                # Estandarizamos el simbolo que viene de la API para compararlo
                 api_symbol = p['symbol']
+                api_clean = clean_symbol(api_symbol)
                 
-                # Extraemos la cantidad (puede venir como 'contracts', 'amount' o 'positionAmt')
+                # Extraemos cantidad de forma segura
                 raw_amt = p.get('contracts') or p.get('amount') or p.get('info', {}).get('positionAmt', 0)
                 amt = float(raw_amt)
-
-                # Si tiene cantidad distinta de 0, imprimimos para depurar
+                
+                # Debug solo si encontramos dinero real (para no llenar el log)
                 if amt != 0:
-                    print(f"🔎 POSICIÓN ENCONTRADA: Símbolo='{api_symbol}' | Amt={amt}")
+                    print(f"🔎 REVISANDO: API='{api_symbol}' (Clean: {api_clean}) vs TARGET='{symbol}' (Clean: {target_clean})")
 
-                # Lógica de coincidencia flexible
-                # Comparamos: 'SOL/USDT' (config) con 'SOL/USDT:USDT' (api) o 'SOLUSDT'
-                # 1. Coincidencia exacta
-                if api_symbol == symbol:
+                # COMPARACIÓN: Si los nombres limpios son iguales, ES LA NUESTRA
+                if target_clean == api_clean:
                     target_position = p
                     break
-                
-                # 2. Coincidencia parcial (Si symbol es 'SOL/USDT' y api es 'SOL/USDT:USDT')
-                if symbol in api_symbol: 
-                    target_position = p
-                    break
-                
-                # 3. Coincidencia sin barra (Si symbol es 'SOL/USDT' y api es 'SOLUSDT')
-                symbol_no_slash = symbol.replace("/", "")
-                if symbol_no_slash == api_symbol:
-                    target_position = p
-                    break
-
+            
             if target_position:
-                # Normalizamos los datos de retorno
                 raw_amt = target_position.get('contracts') or target_position.get('amount') or target_position.get('info', {}).get('positionAmt', 0)
                 entry_price = target_position.get('entryPrice') or target_position.get('info', {}).get('entryPrice', 0)
                 
                 return {
-                    'symbol': target_position['symbol'],
+                    'symbol': target_position['symbol'], # Devolvemos el símbolo real de Binance
                     'amt': float(raw_amt),
                     'entryPrice': float(entry_price)
                 }
@@ -167,13 +147,10 @@ class ExecutionEngine:
     def update_trailing_stop(self, symbol, new_sl_price, side):
         """
         Actualiza el SL en Binance y NOTIFICA a Telegram.
-        Primero cancela órdenes abiertas y luego pone la nueva.
         """
         try:
-            # 1. Cancelar órdenes abiertas para este par (quita el SL anterior)
             self.exchange.cancel_all_orders(symbol)
             
-            # 2. Definir lado de cierre
             sl_side = 'sell' if side == 'buy' else 'buy'
             
             params = {
@@ -181,7 +158,6 @@ class ExecutionEngine:
                 'closePosition': True 
             }
             
-            # 3. Crear nueva orden de Stop
             self.exchange.create_order(
                 symbol=symbol,
                 type='STOP_MARKET',
@@ -193,7 +169,6 @@ class ExecutionEngine:
             
             print(f"[EXEC] SL actualizado exitosamente a {new_sl_price}")
             
-            # Notificación
             msg = (f"🛡️ <b>TRAILING STOP ACTIVADO</b>\n"
                    f"Simbolo: <b>{symbol}</b>\n"
                    f"Nuevo SL: <code>{new_sl_price:.4f}</code>\n"
