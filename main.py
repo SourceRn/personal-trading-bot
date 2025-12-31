@@ -1,6 +1,7 @@
 import time
 import threading
 import sys
+import os  # <--- CORREGIDO: MOVIDO AQUÍ ARRIBA
 import pandas as pd
 from datetime import datetime
 
@@ -9,9 +10,9 @@ from core.api_connector import BinanceConnector
 from core.strategy import Strategy
 from core.risk_manager import RiskManager
 from core.execution import ExecutionEngine 
-from core.shared_state import bot_state  # <--- NUEVO
+from core.shared_state import bot_state
 from utils.telegram_bot import send_message
-from utils.telegram_listener import start_telegram_listener # <--- NUEVO
+from utils.telegram_listener import start_telegram_listener
 from config.settings import settings
 
 def fetch_data(exchange, symbol, timeframe):
@@ -21,11 +22,11 @@ def fetch_data(exchange, symbol, timeframe):
 
 def run_bot():
     # --- INICIO DEL HILO DE TELEGRAM (LISTENER) ---
-    # Lo lanzamos como "daemon" para que si main muere, este hilo también muera
     t_listener = threading.Thread(target=start_telegram_listener, daemon=True)
     t_listener.start()
     
     # --- INICIALIZACIÓN ---
+    print("🚀 Inicializando componentes...")
     connector = BinanceConnector()
     exchange = connector.get_exchange()
     strategy = Strategy()
@@ -34,43 +35,58 @@ def run_bot():
     
     dry_run_position = None 
     
-    # Variables locales de estado
+    # Variables locales
     last_strategy_name = "INICIANDO..."
     tp_alert_sent = False
     sl_alert_sent = False
     active_tp_price = 0.0
     active_sl_price = 0.0
     
-    # Actualizamos estado inicial compartido
+    # Estado inicial
     bot_state.mode = "LIVE" if settings.IS_LIVE else "DRY RUN"
-    bot_state.balance_total = risk_manager._get_available_balance()
-
-    max_loss_usdt = bot_state.balance_total * settings.MAX_DAILY_LOSS
     
+    # Intento inicial de obtener balance (puede fallar, no importa)
+    try:
+        bot_state.balance_total = risk_manager._get_available_balance()
+    except:
+        bot_state.balance_total = 0.0
+
     startup_msg = (f"🤖 <b>Protocol Zero-Emotion Started</b>\n"
                    f"Service PID: {os.getpid()}\n"
                    f"Mode: <b>{bot_state.mode}</b>\n"
                    f"Timeframe: <b>{settings.TIMEFRAME}</b>\n"
                    f"Listener: ACTIVO ✅")
     print(startup_msg)
-    # Hacemos flush para que salga en journalctl inmediato
     sys.stdout.flush() 
     send_message(startup_msg)
 
     try:
-        while bot_state.running: # <--- Controlado por el comando /stop
+        while bot_state.running: 
             
-            # --- ACTUALIZAR ESTADO COMPARTIDO (Para comando /balance) ---
-            # Solo actualizamos balance real ocasionalmente para no saturar API
-            # Ojo: risk_manager._get_available_balance hace petición API
-            # Lo haremos ligero:
-            
-            # 0. VERIFICACIÓN DE SEGURIDAD
-            if bot_state.daily_pnl <= -max_loss_usdt:
+            # --- GESTIÓN DE RIESGO PROFESIONAL ---
+
+            # 1. Calculamos el límite basado en porcentaje (Ej. 10% de tu saldo)
+            percentage_limit = bot_state.balance_total * settings.MAX_DAILY_LOSS
+
+            # 2. Leemos el "Piso Mínimo" desde settings (Ej. 2 USD)
+            # Usamos getattr por seguridad, por si olvidaste agregarlo al archivo, usa 1.0 por defecto
+            min_usd_floor = getattr(settings, 'MIN_DAILY_LOSS_USD', 1.0)
+
+            # 3. Elegimos el MAYOR de los dos.
+            # Si tienes $20, el 10% es $2.0. El piso es $2.0. Resultado: $2.0.
+            # Si tienes $1000, el 10% es $100. El piso es $2.0. Resultado: $100 (Respeta tu % al crecer).
+            # Si tienes $0 (error de API), el 10% es $0. El piso es $2.0. Resultado: $2.0 (Evita el apagado).
+            final_limit_usd = max(percentage_limit, min_usd_floor)
+
+            # 4. Verificación (Circuit Breaker)
+            # Nota: daily_pnl suele ser negativo cuando pierdes, por eso comparamos con negativo
+            if bot_state.daily_pnl <= (final_limit_usd * -1):
                 stop_msg = f"⛔ BOT DETENIDO: Límite de pérdida diaria alcanzado ({bot_state.daily_pnl:.2f} USDT)"
                 print(stop_msg)
                 send_message(stop_msg)
                 break 
+
+            # -------------------------------------
 
             # 1. OBTENCIÓN DE DATOS
             try:
@@ -84,13 +100,11 @@ def run_bot():
             signal, strategy_name = strategy.analyze(df) 
             current_price = df.iloc[-1]['close']
             
-            # --- ACTUALIZAR ESTADO COMPARTIDO (Telemetría) ---
+            # Telemetría
             bot_state.last_price = current_price
             bot_state.strategy_name = strategy_name
-            # Extraemos RSI y ADX del dataframe para el comando /analizar
             if 'RSI' in df.columns: bot_state.rsi = df.iloc[-1]['RSI']
             if 'ADX' in df.columns: bot_state.adx = df.iloc[-1]['ADX']
-            # -------------------------------------------------
 
             # Detección Cambio Estrategia
             current_strat_base = strategy_name.split(" ")[0]
@@ -105,7 +119,13 @@ def run_bot():
             
             # --- LÓGICA LIVE ---
             if settings.IS_LIVE:
-                # Obtenemos info real
+                # Recargar balance periódicamente para actualizar el límite dinámico
+                # (Solo si no estamos en posición para no saturar)
+                if not in_position:
+                   try:
+                       bot_state.balance_total = risk_manager._get_available_balance()
+                   except: pass
+
                 position_data = execution_engine.get_position_details(settings.SYMBOL)
                 
                 if position_data and float(position_data['amt']) != 0:
@@ -114,14 +134,12 @@ def run_bot():
                     entry_price = float(position_data['entryPrice'])
                     side = 'buy' if qty > 0 else 'sell'
                     
-                    # Actualizar estado compartido para comando /posicion
                     bot_state.in_position = True
                     bot_state.pos_type = "LONG" if side == 'buy' else "SHORT"
                     bot_state.entry_price = entry_price
                     pnl_pct_real = (current_price - entry_price) / entry_price if side == 'buy' else (entry_price - current_price) / entry_price
                     bot_state.current_pnl_pct = pnl_pct_real
                     
-                    # Recuperación de precios objetivo
                     if active_tp_price == 0: 
                         tp_factor = (1 + settings.TAKE_PROFIT_PCT) if side == 'buy' else (1 - settings.TAKE_PROFIT_PCT)
                         sl_factor = (1 - settings.STOP_LOSS_PCT) if side == 'buy' else (1 + settings.STOP_LOSS_PCT)
@@ -147,7 +165,7 @@ def run_bot():
                             active_sl_price = new_sl_price 
                             time.sleep(5)
                 else:
-                    bot_state.in_position = False # No hay posición en Binance
+                    bot_state.in_position = False 
 
             # --- LÓGICA DRY RUN ---
             else:
@@ -162,7 +180,6 @@ def run_bot():
                     active_sl_price = sl
                     active_tp_price = tp
                     
-                    # Actualizar estado compartido
                     bot_state.in_position = True
                     bot_state.pos_type = "LONG" if side == 'buy' else "SHORT"
                     bot_state.entry_price = entry
@@ -199,7 +216,7 @@ def run_bot():
                     if close_signal:
                         price_diff = (current_price - entry) if side == 'buy' else (entry - current_price)
                         realized_pnl = price_diff * qty_held
-                        bot_state.daily_pnl += realized_pnl # Update State
+                        bot_state.daily_pnl += realized_pnl 
                         
                         emoji = "✅" if realized_pnl > 0 else "❌"
                         msg = (f"{emoji} <b>Posición CERRADA</b> ({close_signal})\n"
@@ -248,7 +265,6 @@ def run_bot():
                     exec_price = float(order_result.get('average', current_price))
                     quantity = float(order_result.get('amount', 0))
                     
-                    # Set precios iniciales
                     if signal == 'LONG':
                         sl_price = exec_price * (1 - dynamic_sl)
                         tp_price = exec_price * (1 + dynamic_tp)
@@ -272,7 +288,7 @@ def run_bot():
                             'side': 'buy' if signal == 'LONG' else 'sell', 'qty': quantity
                         }
 
-            # Flush logs para journalctl
+            # Flush logs
             sys.stdout.flush()
             time.sleep(60) 
             
@@ -284,6 +300,5 @@ def run_bot():
     finally:
         send_message("🛑 <b>Servicio APAGADO</b>")
 
-import os # Necesario para os.getpid
 if __name__ == "__main__":
     run_bot()

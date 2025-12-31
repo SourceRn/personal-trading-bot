@@ -17,7 +17,7 @@ class Settings:
     # GESTIÓN DE RIESGO CAPITAL
     RISK_PER_TRADE = 0.05   # 2% de tu cuenta por operación
     MAX_DAILY_LOSS = 0.1   # Circuit Breaker al 6% de pérdida diaria
-
+    MIN_DAILY_LOSS_USD = 2.0
     # --- GESTIÓN DINÁMICA DE ESTRATEGIAS (SOLUCIÓN "SÁBANA CORTA") ---
     
     # MODO RANGO (RSI): "Golpea y corre"
