@@ -15,8 +15,8 @@ class Settings:
     LEVERAGE = 4 
     
     # GESTIÓN DE RIESGO CAPITAL
-    RISK_PER_TRADE = 0.02   # 2% de tu cuenta por operación
-    MAX_DAILY_LOSS = 0.06   # Circuit Breaker al 6% de pérdida diaria
+    RISK_PER_TRADE = 0.05   # 2% de tu cuenta por operación
+    MAX_DAILY_LOSS = 0.1   # Circuit Breaker al 6% de pérdida diaria
 
     # --- GESTIÓN DINÁMICA DE ESTRATEGIAS (SOLUCIÓN "SÁBANA CORTA") ---
     
