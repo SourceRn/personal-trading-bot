@@ -47,7 +47,7 @@ class Settings:
     # 1. El Juez (ADX)
     ADX_PERIOD = 14
     # Subimos a 30 para que el Rango tenga prioridad y no se corte antes de tiempo
-    ADX_THRESHOLD = 30 
+    ADX_THRESHOLD = 20 
 
     # 2. Tendencia (EMA)
     EMA_FAST = 9

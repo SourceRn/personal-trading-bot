@@ -40,18 +40,18 @@ class Strategy:
         # --- 2. EL JUEZ: SELECCIÓN DE ESTRATEGIA CON HISTÉRESIS ---
         adx_value = last['ADX']
         
-        # Lógica de Histéresis (Buffer de 5 puntos para evitar parpadeo)
+        # Lógica de Histéresis (Buffer de 2 puntos para evitar parpadeo)
         # Solo cambiamos a TREND si el ADX rompe con fuerza hacia arriba
         if adx_value >= settings.ADX_THRESHOLD:
             self.current_mode = "TREND"
         
-        # Solo regresamos a RANGE si el ADX se debilita claramente (Threshold - 5)
-        # Ejemplo: Si umbral es 25, debe bajar de 20 para volver a Range.
-        elif adx_value < (settings.ADX_THRESHOLD - 5):
+        # Solo regresamos a RANGE si el ADX se debilita claramente (Threshold - 2)
+        # Ejemplo: Si umbral es 20, debe bajar de 18 para volver a Range.
+        elif adx_value < (settings.ADX_THRESHOLD - 2):
             self.current_mode = "RANGE"
             
-        # NOTA: Si el ADX está entre 20 y 25, self.current_mode NO cambia.
-        # Esto elimina el ruido cuando el ADX oscila (24.9 -> 25.1 -> 24.8).
+        # NOTA: Si el ADX está entre 18 y 20, self.current_mode NO cambia.
+        # Esto elimina el ruido cuando el ADX oscila (18.9 -> 19.1 -> 20.0).
 
         # --- 3. EJECUCIÓN DE LA ESTRATEGIA ACTIVA ---
         if self.current_mode == "TREND":
