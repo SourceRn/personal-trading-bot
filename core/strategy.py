@@ -44,7 +44,7 @@ class Strategy:
         # --- 2. SELECCIÓN DE MODO (EL INTERRUPTOR MAESTRO) ---
         
         # Leemos el modo de la memoria
-        mode_settings = bot_state.strategy_mode
+        mode_setting = bot_state.strategy_mode
         
         mode_to_use = None
 
