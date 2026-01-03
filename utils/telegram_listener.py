@@ -115,6 +115,56 @@ def start_telegram_listener():
         bot.reply_to(message, "🛑 <b>Recibido. Iniciando secuencia de apagado...</b>", parse_mode="HTML")
         bot_state.running = False # Esto rompe el bucle en main.py
 
+    # COMANDO: /mode (Menú Interactivo)
+    @bot.message_handler(commands=['mode', 'modo'])
+    def cmd_mode(message):
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        
+        # Definimos los botones
+        btn_auto = types.InlineKeyboardButton("🧠 AUTO (ADX Inteligente)", callback_data="set_mode_auto")
+        btn_trend = types.InlineKeyboardButton("🌊 FORZAR TENDENCIA (EMA)", callback_data="set_mode_trend")
+        btn_range = types.InlineKeyboardButton("🎯 FORZAR RANGO (RSI)", callback_data="set_mode_range")
+        
+        markup.add(btn_auto, btn_trend, btn_range)
+        
+        current_mode = bot_state.strategy_mode
+        msg = (f"⚙️ <b>PANEL DE CONTROL DE ESTRATEGIA</b>\n"
+               f"━━━━━━━━━━━━━━━━━━\n"
+               f"Modo Actual: <b>{current_mode}</b>\n\n"
+               f"Selecciona el nuevo comportamiento:")
+               
+        bot.reply_to(message, msg, reply_markup=markup, parse_mode="HTML")
+
+    # MANEJADOR DE CLICS EN BOTONES (Callbacks)
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('set_mode_'))
+    def callback_mode_handler(call):
+        new_mode = "AUTO"
+        text_mode = "🧠 AUTO"
+        
+        if call.data == "set_mode_trend":
+            new_mode = "FORCE_TREND"
+            text_mode = "🌊 FORCE TREND"
+        elif call.data == "set_mode_range":
+            new_mode = "FORCE_RANGE"
+            text_mode = "🎯 FORCE RANGE"
+        
+        # 1. Actualizamos la memoria del bot INSTANTÁNEAMENTE
+        bot_state.strategy_mode = new_mode
+        
+        # 2. Feedback al usuario (Popup pequeño)
+        bot.answer_callback_query(call.id, f"Modo actualizado a: {new_mode}")
+        
+        # 3. Editamos el mensaje original para confirmar el cambio
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                text=f"✅ <b>ESTRATEGIA ACTUALIZADA</b>\n\nNuevo Modo: <b>{new_mode}</b>\n<i>El cambio se aplicará en la siguiente vela.</i>",
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
     # --- 3. BUCLE INFINITO (Polling) ---
     print("👂 Iniciando Polling de Telegram...")
     try:

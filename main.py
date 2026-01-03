@@ -51,6 +51,10 @@ def run_bot():
     except:
         bot_state.balance_total = 0.0
 
+    # Cargamos el modo por defecto desde settings a la memoria dinámica
+    bot_state.strategy_mode = settings.STRATEGY_MODE 
+    # -------------------------
+
     startup_msg = (f"🤖 <b>Protocol Zero-Emotion Started</b>\n"
                    f"Service PID: {os.getpid()}\n"
                    f"Mode: <b>{bot_state.mode}</b>\n"
@@ -61,6 +65,7 @@ def run_bot():
     send_message(startup_msg)
 
     try:
+
         while bot_state.running: 
             
             # --- GESTIÓN DE RIESGO PROFESIONAL ---

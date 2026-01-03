@@ -8,6 +8,9 @@ class BotState:
     mode: str = "INIT"
     uptime: datetime = datetime.now()
     
+    # Controlar modo de BOT
+    strategy_mode: str = "AUTO"
+
     # Datos de Mercado en tiempo real
     last_price: float = 0.0
     strategy_name: str = "ESPERANDO DATOS..."

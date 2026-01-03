@@ -43,6 +43,14 @@ class Settings:
     # --- ALERTAS ---
     ALERT_PROXIMITY_PCT = 0.003 
 
+    # === SELECTOR DE ESTRATEGIA MAESTRA ===
+    # Opciones disponibles:
+    # "AUTO"        -> Usa el ADX para cambiar entre Rango y Tendencia (Tu modo híbrido actual).
+    # "FORCE_TREND" -> Ignora el ADX y fuerza siempre la estrategia de Cruce de EMAs.
+    # "FORCE_RANGE" -> Ignora el ADX y fuerza siempre la estrategia de RSI.
+    
+    STRATEGY_MODE = "FORCE_TREND"  # <--- Aquí cambias el modo según el clima del mercado
+
     # --- CONFIGURACIÓN TÉCNICA ESTRATEGIAS ---
     # 1. El Juez (ADX)
     ADX_PERIOD = 14
