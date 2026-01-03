@@ -164,6 +164,47 @@ def start_telegram_listener():
             )
         except:
             pass
+    
+    # COMANDO: /config (Ver configuración actual)
+    @bot.message_handler(commands=['config', 'conf', 'settings'])
+    def cmd_config(message):
+        # 1. Determinamos el modo activo real desde la memoria
+        active_mode = bot_state.strategy_mode
+        
+        msg = (
+            f"⚙️ <b>CONFIGURACIÓN ACTUAL</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"<b>🧠 MODO DE ESTRATEGIA</b>\n"
+            f"• Base: <code>{settings.STRATEGY_MODE}</code>\n"
+            f"• Activo: <b>{active_mode}</b>\n\n"
+            
+            f"<b>🎮 GENERAL</b>\n"
+            f"• Par: <code>{settings.SYMBOL}</code>\n"
+            f"• Timeframe: <code>{settings.TIMEFRAME}</code>\n"
+            f"• Apalancamiento: <code>{settings.LEVERAGE}x</code>\n\n"
+
+            f"<b>🛡️ RIESGO</b>\n"
+            f"• Riesgo/Trade: <code>{settings.RISK_PER_TRADE*100}%</code>\n"
+            f"• Max Pérdida Día: <code>{settings.MAX_DAILY_LOSS*100}%</code>\n"
+            f"• Piso Mínimo: <code>${getattr(settings, 'MIN_DAILY_LOSS_USD', 1.0)}</code>\n\n"
+
+            f"<b>🌊 TENDENCIA (Trend)</b>\n"
+            f"• TP: <code>{settings.TREND_TP*100}%</code> | SL: <code>{settings.TREND_SL*100}%</code>\n"
+            f"• Trailing Trigger: <code>{settings.TREND_TRAILING_TRIGGER*100}%</code>\n"
+            f"• Trailing Step: <code>{settings.TREND_TRAILING_STEP*100}%</code>\n\n"
+
+            f"<b>🎯 RANGO (Range)</b>\n"
+            f"• TP: <code>{settings.RANGE_TP*100}%</code> | SL: <code>{settings.RANGE_SL*100}%</code>\n"
+            f"• Trailing Trigger: <code>{settings.RANGE_TRAILING_TRIGGER*100}%</code>\n"
+            f"• Trailing Step: <code>{settings.RANGE_TRAILING_STEP*100}%</code>\n\n"
+            
+            f"<b>📊 INDICADORES</b>\n"
+            f"• ADX Umbral: <code>{settings.ADX_THRESHOLD}</code>\n"
+            f"• EMAs: <code>{settings.EMA_FAST}/{settings.EMA_SLOW}</code>\n"
+            f"• RSI Límites: <code>{settings.RSI_LONG_THRESHOLD}/{settings.RSI_SHORT_THRESHOLD}</code>"
+        )
+        
+        bot.reply_to(message, msg, parse_mode="HTML")
 
     # --- 3. BUCLE INFINITO (Polling) ---
     print("👂 Iniciando Polling de Telegram...")

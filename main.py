@@ -1,7 +1,7 @@
 import time
 import threading
 import sys
-import os  # <--- CORREGIDO: MOVIDO AQUÍ ARRIBA
+import os
 import pandas as pd
 from datetime import datetime
 
@@ -45,19 +45,20 @@ def run_bot():
     # Estado inicial
     bot_state.mode = "LIVE" if settings.IS_LIVE else "DRY RUN"
     
-    # Intento inicial de obtener balance (puede fallar, no importa)
+    # Cargamos el modo por defecto desde settings a la memoria dinámica
+    # (Esto permite que el comando /mode funcione desde el inicio)
+    bot_state.strategy_mode = settings.STRATEGY_MODE 
+    
+    # Intento inicial de obtener balance
     try:
         bot_state.balance_total = risk_manager._get_available_balance()
     except:
         bot_state.balance_total = 0.0
 
-    # Cargamos el modo por defecto desde settings a la memoria dinámica
-    bot_state.strategy_mode = settings.STRATEGY_MODE 
-    # -------------------------
-
     startup_msg = (f"🤖 <b>Protocol Zero-Emotion Started</b>\n"
                    f"Service PID: {os.getpid()}\n"
                    f"Mode: <b>{bot_state.mode}</b>\n"
+                   f"Strategy Mode: <b>{bot_state.strategy_mode}</b>\n"
                    f"Timeframe: <b>{settings.TIMEFRAME}</b>\n"
                    f"Listener: ACTIVO ✅")
     print(startup_msg)
@@ -65,26 +66,13 @@ def run_bot():
     send_message(startup_msg)
 
     try:
-
         while bot_state.running: 
             
             # --- GESTIÓN DE RIESGO PROFESIONAL ---
-
-            # 1. Calculamos el límite basado en porcentaje (Ej. 10% de tu saldo)
             percentage_limit = bot_state.balance_total * settings.MAX_DAILY_LOSS
-
-            # 2. Leemos el "Piso Mínimo" desde settings (Ej. 2 USD)
-            # Usamos getattr por seguridad, por si olvidaste agregarlo al archivo, usa 1.0 por defecto
             min_usd_floor = getattr(settings, 'MIN_DAILY_LOSS_USD', 1.0)
-
-            # 3. Elegimos el MAYOR de los dos.
-            # Si tienes $20, el 10% es $2.0. El piso es $2.0. Resultado: $2.0.
-            # Si tienes $1000, el 10% es $100. El piso es $2.0. Resultado: $100 (Respeta tu % al crecer).
-            # Si tienes $0 (error de API), el 10% es $0. El piso es $2.0. Resultado: $2.0 (Evita el apagado).
             final_limit_usd = max(percentage_limit, min_usd_floor)
 
-            # 4. Verificación (Circuit Breaker)
-            # Nota: daily_pnl suele ser negativo cuando pierdes, por eso comparamos con negativo
             if bot_state.daily_pnl <= (final_limit_usd * -1):
                 stop_msg = f"⛔ BOT DETENIDO: Límite de pérdida diaria alcanzado ({bot_state.daily_pnl:.2f} USDT)"
                 print(stop_msg)
@@ -102,7 +90,17 @@ def run_bot():
                 continue
 
             # Análisis
-            signal, strategy_name = strategy.analyze(df) 
+            # La estrategia lee bot_state.strategy_mode internamente
+            signal_data = strategy.analyze(df) 
+            
+            # Desempaquetado seguro (Tuple vs None)
+            if signal_data:
+                signal = signal_data[0]
+                strategy_name = signal_data[1]
+            else:
+                signal = None
+                strategy_name = "WAITING..."
+
             current_price = df.iloc[-1]['close']
             
             # Telemetría
@@ -111,7 +109,7 @@ def run_bot():
             if 'RSI' in df.columns: bot_state.rsi = df.iloc[-1]['RSI']
             if 'ADX' in df.columns: bot_state.adx = df.iloc[-1]['ADX']
 
-            # Detección Cambio Estrategia
+            # Detección Cambio Estrategia (Visual)
             current_strat_base = strategy_name.split(" ")[0]
             last_strat_base = last_strategy_name.split(" ")[0]
 
@@ -122,14 +120,22 @@ def run_bot():
             # 2. GESTIÓN DE POSICIONES
             in_position = False
             
+            # --- SELECCIÓN AUTOMÁTICA DE PARÁMETROS DE TRAILING ---
+            # Determinamos qué configuración usar según el nombre de la estrategia activa
+            # o el tipo de posición que estamos gestionando.
+            if "TREND" in strategy_name or "TREND" in last_strategy_name:
+                active_trailing_trigger = settings.TREND_TRAILING_TRIGGER
+                active_trailing_step = settings.TREND_TRAILING_STEP
+            else:
+                active_trailing_trigger = settings.RANGE_TRAILING_TRIGGER
+                active_trailing_step = settings.RANGE_TRAILING_STEP
+
             # --- LÓGICA LIVE ---
             if settings.IS_LIVE:
-                # Recargar balance periódicamente para actualizar el límite dinámico
-                # (Solo si no estamos en posición para no saturar)
                 if not in_position:
-                   try:
-                       bot_state.balance_total = risk_manager._get_available_balance()
-                   except: pass
+                    try:
+                        bot_state.balance_total = risk_manager._get_available_balance()
+                    except: pass
 
                 position_data = execution_engine.get_position_details(settings.SYMBOL)
                 
@@ -145,30 +151,44 @@ def run_bot():
                     pnl_pct_real = (current_price - entry_price) / entry_price if side == 'buy' else (entry_price - current_price) / entry_price
                     bot_state.current_pnl_pct = pnl_pct_real
                     
+                    # Inicialización de precios TP/SL visuales si se reinició el bot
                     if active_tp_price == 0: 
                         tp_factor = (1 + settings.TAKE_PROFIT_PCT) if side == 'buy' else (1 - settings.TAKE_PROFIT_PCT)
                         sl_factor = (1 - settings.STOP_LOSS_PCT) if side == 'buy' else (1 + settings.STOP_LOSS_PCT)
                         active_tp_price = entry_price * tp_factor
                         active_sl_price = entry_price * sl_factor
 
-                    # TRAILING STOP (LIVE)
+                    # ==========================================
+                    #    TRAILING STOP DINÁMICO (AUTOMATIZADO)
+                    # ==========================================
                     should_update = False
                     new_sl_price = 0.0
                     
-                    if side == 'buy':
-                        if pnl_pct_real >= settings.TRAILING_TRIGGER:
-                            target_sl = entry_price * (1 + settings.TRAILING_STEP)
-                            if target_sl > entry_price: new_sl_price = target_sl; should_update = True
-                    elif side == 'sell':
-                        if pnl_pct_real >= settings.TRAILING_TRIGGER:
-                            target_sl = entry_price * (1 - settings.TRAILING_STEP)
-                            if target_sl < entry_price: new_sl_price = target_sl; should_update = True
+                    # Usamos active_trailing_trigger y step seleccionados arriba automáticamente
+                    if pnl_pct_real >= active_trailing_trigger:
+                        
+                        if side == 'buy':
+                            # SL persigue al precio desde abajo
+                            target_sl = current_price * (1 - active_trailing_step)
+                            if target_sl > active_sl_price:
+                                new_sl_price = target_sl
+                                should_update = True
+                        
+                        elif side == 'sell':
+                            # SL persigue al precio desde arriba
+                            target_sl = current_price * (1 + active_trailing_step)
+                            if active_sl_price == 0 or target_sl < active_sl_price:
+                                new_sl_price = target_sl
+                                should_update = True
                     
                     if should_update:
+                        print(f"🔄 Trailing Stop ({'TREND' if 'TREND' in strategy_name else 'RANGE'}): Moviendo SL a {new_sl_price:.4f}")
                         success = execution_engine.update_trailing_stop(settings.SYMBOL, new_sl_price, side)
                         if success:
                             active_sl_price = new_sl_price 
-                            time.sleep(5)
+                            time.sleep(2)
+                    # ==========================================
+
                 else:
                     bot_state.in_position = False 
 
@@ -182,6 +202,7 @@ def run_bot():
                     side = dry_run_position['side']
                     qty_held = dry_run_position.get('qty', 0.0)
                     
+                    # Sincronización visual
                     active_sl_price = sl
                     active_tp_price = tp
                     
@@ -191,17 +212,19 @@ def run_bot():
                     pnl_pct_sim = (current_price - entry) / entry if side == 'buy' else (entry - current_price) / entry
                     bot_state.current_pnl_pct = pnl_pct_sim
 
-                    # Trailing Stop Dry Run
+                    # TRAILING STOP DRY RUN (DINÁMICO)
                     new_sl = None
                     sl_changed = False
-                    if side == 'buy':
-                        if pnl_pct_sim >= settings.TRAILING_TRIGGER:
-                            target_sl = entry * (1 + settings.TRAILING_STEP)
-                            if sl < target_sl: new_sl = target_sl; sl_changed = True
-                    elif side == 'sell':
-                        if pnl_pct_sim >= settings.TRAILING_TRIGGER:
-                            target_sl = entry * (1 - settings.TRAILING_STEP)
-                            if sl > target_sl: new_sl = target_sl; sl_changed = True
+                    
+                    if pnl_pct_sim >= active_trailing_trigger:
+                        if side == 'buy':
+                            target_sl = current_price * (1 - active_trailing_step)
+                            if sl < target_sl: 
+                                new_sl = target_sl; sl_changed = True
+                        elif side == 'sell':
+                            target_sl = current_price * (1 + active_trailing_step)
+                            if sl > target_sl: 
+                                new_sl = target_sl; sl_changed = True
                     
                     if sl_changed and new_sl:
                         dry_run_position['sl'] = new_sl
@@ -283,6 +306,7 @@ def run_bot():
                     active_tp_price = tp_price
 
                     msg = (f"{side_emoji} <b>ORDEN EJECUTADA</b>\n"
+                           f"Estrategia: <b>{strategy_name}</b>\n"
                            f"Entrada: ${exec_price:,.2f}\n"
                            f"SL: ${sl_price:,.2f} | TP: ${tp_price:,.2f}")
                     send_message(msg)

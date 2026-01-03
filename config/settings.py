@@ -34,12 +34,18 @@ class Settings:
     STOP_LOSS_PCT = 0.018
     TAKE_PROFIT_PCT = 0.03
 
-    # --- TRAILING STOP ---
-    # Activamos el seguro cuando ganamos 1.5%
-    TRAILING_TRIGGER = 0.015 
-    # Dejamos 0.5% de espacio
-    TRAILING_STEP = 0.005     
-
+    # --- TRAILING STOP (PERFILES AUTOMÁTICOS) ---
+    
+    # PERFIL TENDENCIA (TREND): "Correa Larga"
+    # Objetivo: Aguantar volatilidad y buscar home-runs.
+    TREND_TRAILING_TRIGGER = 0.015  # Se activa al 1.5% de ganancia
+    TREND_TRAILING_STEP = 0.010     # Mantiene distancia del 1.0%
+    
+    # PERFIL RANGO (RANGE): "Correa Corta"
+    # Objetivo: Asegurar ganancias rápidas antes de que el precio rebote.
+    RANGE_TRAILING_TRIGGER = 0.008  # Se activa al 0.8% de ganancia
+    RANGE_TRAILING_STEP = 0.005     # Mantiene distancia del 0.5%
+    
     # --- ALERTAS ---
     ALERT_PROXIMITY_PCT = 0.003 
 
