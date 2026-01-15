@@ -46,7 +46,6 @@ def run_bot():
     bot_state.mode = "LIVE" if settings.IS_LIVE else "DRY RUN"
     
     # Cargamos el modo por defecto desde settings a la memoria dinámica
-    # (Esto permite que el comando /mode funcione desde el inicio)
     bot_state.strategy_mode = settings.STRATEGY_MODE 
     
     # Intento inicial de obtener balance
@@ -90,10 +89,9 @@ def run_bot():
                 continue
 
             # Análisis
-            # La estrategia lee bot_state.strategy_mode internamente
             signal_data = strategy.analyze(df) 
             
-            # Desempaquetado seguro (Tuple vs None)
+            # Desempaquetado seguro
             if signal_data:
                 signal = signal_data[0]
                 strategy_name = signal_data[1]
@@ -109,7 +107,7 @@ def run_bot():
             if 'RSI' in df.columns: bot_state.rsi = df.iloc[-1]['RSI']
             if 'ADX' in df.columns: bot_state.adx = df.iloc[-1]['ADX']
 
-            # Detección Cambio Estrategia (Visual)
+            # Detección Cambio Estrategia
             current_strat_base = strategy_name.split(" ")[0]
             last_strat_base = last_strategy_name.split(" ")[0]
 
@@ -121,8 +119,6 @@ def run_bot():
             in_position = False
             
             # --- SELECCIÓN AUTOMÁTICA DE PARÁMETROS DE TRAILING ---
-            # Determinamos qué configuración usar según el nombre de la estrategia activa
-            # o el tipo de posición que estamos gestionando.
             if "TREND" in strategy_name or "TREND" in last_strategy_name:
                 active_trailing_trigger = settings.TREND_TRAILING_TRIGGER
                 active_trailing_step = settings.TREND_TRAILING_STEP
@@ -151,7 +147,7 @@ def run_bot():
                     pnl_pct_real = (current_price - entry_price) / entry_price if side == 'buy' else (entry_price - current_price) / entry_price
                     bot_state.current_pnl_pct = pnl_pct_real
                     
-                    # Inicialización de precios TP/SL visuales si se reinició el bot
+                    # Inicialización de precios TP/SL visuales
                     if active_tp_price == 0: 
                         tp_factor = (1 + settings.TAKE_PROFIT_PCT) if side == 'buy' else (1 - settings.TAKE_PROFIT_PCT)
                         sl_factor = (1 - settings.STOP_LOSS_PCT) if side == 'buy' else (1 + settings.STOP_LOSS_PCT)
@@ -161,32 +157,34 @@ def run_bot():
                     # ==========================================
                     #    TRAILING STOP DINÁMICO (AUTOMATIZADO)
                     # ==========================================
-                    should_update = False
-                    new_sl_price = 0.0
-                    
-                    # Usamos active_trailing_trigger y step seleccionados arriba automáticamente
-                    if pnl_pct_real >= active_trailing_trigger:
+                    # Solo ejecutamos si el interruptor está ENCENDIDO
+                    if bot_state.trailing_enabled:
+                        should_update = False
+                        new_sl_price = 0.0
                         
-                        if side == 'buy':
-                            # SL persigue al precio desde abajo
-                            target_sl = current_price * (1 - active_trailing_step)
-                            if target_sl > active_sl_price:
-                                new_sl_price = target_sl
-                                should_update = True
+                        # Usamos active_trailing_trigger y step seleccionados arriba automáticamente
+                        if pnl_pct_real >= active_trailing_trigger:
+                            
+                            if side == 'buy':
+                                # SL persigue al precio desde abajo
+                                target_sl = current_price * (1 - active_trailing_step)
+                                if target_sl > active_sl_price:
+                                    new_sl_price = target_sl
+                                    should_update = True
+                            
+                            elif side == 'sell':
+                                # SL persigue al precio desde arriba
+                                target_sl = current_price * (1 + active_trailing_step)
+                                if active_sl_price == 0 or target_sl < active_sl_price:
+                                    new_sl_price = target_sl
+                                    should_update = True
                         
-                        elif side == 'sell':
-                            # SL persigue al precio desde arriba
-                            target_sl = current_price * (1 + active_trailing_step)
-                            if active_sl_price == 0 or target_sl < active_sl_price:
-                                new_sl_price = target_sl
-                                should_update = True
-                    
-                    if should_update:
-                        print(f"🔄 Trailing Stop ({'TREND' if 'TREND' in strategy_name else 'RANGE'}): Moviendo SL a {new_sl_price:.4f}")
-                        success = execution_engine.update_trailing_stop(settings.SYMBOL, new_sl_price, side)
-                        if success:
-                            active_sl_price = new_sl_price 
-                            time.sleep(2)
+                        if should_update:
+                            print(f"🔄 Trailing Stop ({'TREND' if 'TREND' in strategy_name else 'RANGE'}): Moviendo SL a {new_sl_price:.4f}")
+                            success = execution_engine.update_trailing_stop(settings.SYMBOL, new_sl_price, side)
+                            if success:
+                                active_sl_price = new_sl_price 
+                                time.sleep(2)
                     # ==========================================
 
                 else:
@@ -212,25 +210,26 @@ def run_bot():
                     pnl_pct_sim = (current_price - entry) / entry if side == 'buy' else (entry - current_price) / entry
                     bot_state.current_pnl_pct = pnl_pct_sim
 
-                    # TRAILING STOP DRY RUN (DINÁMICO)
-                    new_sl = None
-                    sl_changed = False
-                    
-                    if pnl_pct_sim >= active_trailing_trigger:
-                        if side == 'buy':
-                            target_sl = current_price * (1 - active_trailing_step)
-                            if sl < target_sl: 
-                                new_sl = target_sl; sl_changed = True
-                        elif side == 'sell':
-                            target_sl = current_price * (1 + active_trailing_step)
-                            if sl > target_sl: 
-                                new_sl = target_sl; sl_changed = True
-                    
-                    if sl_changed and new_sl:
-                        dry_run_position['sl'] = new_sl
-                        active_sl_price = new_sl
-                        send_message(f"🛡️ <b>SL ACTUALIZADO</b> a <code>{new_sl:.2f}</code> (Trailing)")
-                        sl = new_sl 
+                    # TRAILING STOP DRY RUN
+                    if bot_state.trailing_enabled:
+                        new_sl = None
+                        sl_changed = False
+                        
+                        if pnl_pct_sim >= active_trailing_trigger:
+                            if side == 'buy':
+                                target_sl = current_price * (1 - active_trailing_step)
+                                if sl < target_sl: 
+                                    new_sl = target_sl; sl_changed = True
+                            elif side == 'sell':
+                                target_sl = current_price * (1 + active_trailing_step)
+                                if sl > target_sl: 
+                                    new_sl = target_sl; sl_changed = True
+                        
+                        if sl_changed and new_sl:
+                            dry_run_position['sl'] = new_sl
+                            active_sl_price = new_sl
+                            send_message(f"🛡️ <b>SL ACTUALIZADO</b> a <code>{new_sl:.2f}</code> (Trailing)")
+                            sl = new_sl 
 
                     # Cierre Dry Run
                     close_signal = None

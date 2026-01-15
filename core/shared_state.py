@@ -10,6 +10,9 @@ class BotState:
     
     # Controlar modo de BOT
     strategy_mode: str = "AUTO"
+    
+    # --- NUEVO: Interruptor Trailing Stop ---
+    trailing_enabled: bool = True  # Por defecto encendido
 
     # Datos de Mercado en tiempo real
     last_price: float = 0.0

@@ -23,7 +23,6 @@ def start_telegram_listener():
     print("👂 Telegram Command Listener Iniciado...")
 
     # --- 1. CONFIGURACIÓN DEL MENÚ DE COMANDOS (UX) ---
-    # Esto crea el botón "Menú" azul en Telegram con las opciones
     try:
         print("⚙️ Configurando menú de comandos en Telegram...")
         bot.set_my_commands([
@@ -31,6 +30,7 @@ def start_telegram_listener():
             types.BotCommand("scan", "🔍 Escanear mercado (RSI/ADX)"),
             types.BotCommand("balance", "💰 Ver saldo y PnL diario"),
             types.BotCommand("status", "📊 Estado del sistema"),
+            types.BotCommand("trailing", "🛡️ Configurar Trailing Stop"),
             types.BotCommand("stop", "🛑 Apagado de emergencia")
         ])
     except Exception as e:
@@ -41,11 +41,13 @@ def start_telegram_listener():
     # COMANDO: /status
     @bot.message_handler(commands=['status', 'bot'])
     def cmd_status(message):
-        # Calculamos uptime si existe la variable, si no, mostramos "N/A"
         try:
             uptime_val = str(datetime.now() - bot_state.uptime).split('.')[0]
         except:
             uptime_val = "Calculando..."
+
+        # Estado visual del Trailing
+        ts_status = "✅ ON" if bot_state.trailing_enabled else "❌ OFF"
 
         msg = (
             f"🤖 <b>SYSTEM STATUS</b>\n"
@@ -53,6 +55,7 @@ def start_telegram_listener():
             f"⏱️ Uptime: <code>{uptime_val}</code>\n"
             f"⚙️ Modo: <b>{bot_state.mode}</b>\n"
             f"🧠 Estrategia: <b>{bot_state.strategy_name}</b>\n"
+            f"🛡️ Trailing Stop: <b>{ts_status}</b>\n"
             f"💲 Precio: <code>{bot_state.last_price}</code>"
         )
         bot.reply_to(message, msg, parse_mode="HTML")
@@ -91,7 +94,6 @@ def start_telegram_listener():
     # COMANDO: /scan
     @bot.message_handler(commands=['analizar', 'scan'])
     def cmd_scan(message):
-        # Interpretación visual rápida
         rsi = bot_state.rsi
         adx = bot_state.adx
         
@@ -113,18 +115,15 @@ def start_telegram_listener():
     @bot.message_handler(commands=['stop'])
     def cmd_stop(message):
         bot.reply_to(message, "🛑 <b>Recibido. Iniciando secuencia de apagado...</b>", parse_mode="HTML")
-        bot_state.running = False # Esto rompe el bucle en main.py
+        bot_state.running = False 
 
     # COMANDO: /mode (Menú Interactivo)
     @bot.message_handler(commands=['mode', 'modo'])
     def cmd_mode(message):
         markup = types.InlineKeyboardMarkup(row_width=1)
-        
-        # Definimos los botones
         btn_auto = types.InlineKeyboardButton("🧠 AUTO (ADX Inteligente)", callback_data="set_mode_auto")
         btn_trend = types.InlineKeyboardButton("🌊 FORZAR TENDENCIA (EMA)", callback_data="set_mode_trend")
         btn_range = types.InlineKeyboardButton("🎯 FORZAR RANGO (RSI)", callback_data="set_mode_range")
-        
         markup.add(btn_auto, btn_trend, btn_range)
         
         current_mode = bot_state.strategy_mode
@@ -135,48 +134,35 @@ def start_telegram_listener():
                
         bot.reply_to(message, msg, reply_markup=markup, parse_mode="HTML")
 
-    # MANEJADOR DE CLICS EN BOTONES (Callbacks)
     @bot.callback_query_handler(func=lambda call: call.data.startswith('set_mode_'))
     def callback_mode_handler(call):
         new_mode = "AUTO"
-        text_mode = "🧠 AUTO"
+        if call.data == "set_mode_trend": new_mode = "FORCE_TREND"
+        elif call.data == "set_mode_range": new_mode = "FORCE_RANGE"
         
-        if call.data == "set_mode_trend":
-            new_mode = "FORCE_TREND"
-            text_mode = "🌊 FORCE TREND"
-        elif call.data == "set_mode_range":
-            new_mode = "FORCE_RANGE"
-            text_mode = "🎯 FORCE RANGE"
-        
-        # 1. Actualizamos la memoria del bot INSTANTÁNEAMENTE
         bot_state.strategy_mode = new_mode
-        
-        # 2. Feedback al usuario (Popup pequeño)
         bot.answer_callback_query(call.id, f"Modo actualizado a: {new_mode}")
-        
-        # 3. Editamos el mensaje original para confirmar el cambio
         try:
             bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
+                chat_id=call.message.chat.id, message_id=call.message.message_id,
                 text=f"✅ <b>ESTRATEGIA ACTUALIZADA</b>\n\nNuevo Modo: <b>{new_mode}</b>\n<i>El cambio se aplicará en la siguiente vela.</i>",
                 parse_mode="HTML"
             )
-        except:
-            pass
+        except: pass
     
-    # COMANDO: /config (Ver configuración actual)
+    # COMANDO: /config
     @bot.message_handler(commands=['config', 'conf', 'settings'])
     def cmd_config(message):
-        # 1. Determinamos el modo activo real desde la memoria
         active_mode = bot_state.strategy_mode
+        ts_state = "ACTIVADO" if bot_state.trailing_enabled else "DESACTIVADO"
         
         msg = (
             f"⚙️ <b>CONFIGURACIÓN ACTUAL</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<b>🧠 MODO DE ESTRATEGIA</b>\n"
             f"• Base: <code>{settings.STRATEGY_MODE}</code>\n"
-            f"• Activo: <b>{active_mode}</b>\n\n"
+            f"• Activo: <b>{active_mode}</b>\n"
+            f"• Trailing Stop: <b>{ts_state}</b>\n\n"
             
             f"<b>🎮 GENERAL</b>\n"
             f"• Par: <code>{settings.SYMBOL}</code>\n"
@@ -185,8 +171,7 @@ def start_telegram_listener():
 
             f"<b>🛡️ RIESGO</b>\n"
             f"• Riesgo/Trade: <code>{settings.RISK_PER_TRADE*100}%</code>\n"
-            f"• Max Pérdida Día: <code>{settings.MAX_DAILY_LOSS*100}%</code>\n"
-            f"• Piso Mínimo: <code>${getattr(settings, 'MIN_DAILY_LOSS_USD', 1.0)}</code>\n\n"
+            f"• Max Pérdida Día: <code>{settings.MAX_DAILY_LOSS*100}%</code>\n\n"
 
             f"<b>🌊 TENDENCIA (Trend)</b>\n"
             f"• TP: <code>{settings.TREND_TP*100}%</code> | SL: <code>{settings.TREND_SL*100}%</code>\n"
@@ -196,15 +181,53 @@ def start_telegram_listener():
             f"<b>🎯 RANGO (Range)</b>\n"
             f"• TP: <code>{settings.RANGE_TP*100}%</code> | SL: <code>{settings.RANGE_SL*100}%</code>\n"
             f"• Trailing Trigger: <code>{settings.RANGE_TRAILING_TRIGGER*100}%</code>\n"
-            f"• Trailing Step: <code>{settings.RANGE_TRAILING_STEP*100}%</code>\n\n"
-            
-            f"<b>📊 INDICADORES</b>\n"
-            f"• ADX Umbral: <code>{settings.ADX_THRESHOLD}</code>\n"
-            f"• EMAs: <code>{settings.EMA_FAST}/{settings.EMA_SLOW}</code>\n"
-            f"• RSI Límites: <code>{settings.RSI_LONG_THRESHOLD}/{settings.RSI_SHORT_THRESHOLD}</code>"
+            f"• Trailing Step: <code>{settings.RANGE_TRAILING_STEP*100}%</code>"
         )
-        
         bot.reply_to(message, msg, parse_mode="HTML")
+
+    # --- NUEVO: COMANDO /trailing ---
+    @bot.message_handler(commands=['trailing', 'ts'])
+    def cmd_trailing_toggle(message):
+        markup = types.InlineKeyboardMarkup()
+        
+        if bot_state.trailing_enabled:
+            btn_text = "🛑 DESACTIVAR Trailing Stop"
+            callback_data = "trailing_off"
+            status_text = "✅ ACTIVO"
+        else:
+            btn_text = "🟢 ACTIVAR Trailing Stop"
+            callback_data = "trailing_on"
+            status_text = "❌ INACTIVO"
+            
+        btn = types.InlineKeyboardButton(btn_text, callback_data=callback_data)
+        markup.add(btn)
+        
+        msg = (f"🛡️ <b>CONFIGURACIÓN TRAILING STOP</b>\n"
+               f"━━━━━━━━━━━━━━━━━━\n"
+               f"Estado Actual: <b>{status_text}</b>\n\n"
+               f"<i>Si lo desactivas, la operación se cerrará solo por TP o SL fijo original.</i>")
+               
+        bot.reply_to(message, msg, reply_markup=markup, parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('trailing_'))
+    def callback_trailing(call):
+        if call.data == "trailing_off":
+            bot_state.trailing_enabled = False
+            new_status = "❌ DESACTIVADO"
+            reply_text = "🛑 Trailing Stop APAGADO."
+        elif call.data == "trailing_on":
+            bot_state.trailing_enabled = True
+            new_status = "✅ ACTIVADO"
+            reply_text = "🟢 Trailing Stop ENCENDIDO."
+        
+        bot.answer_callback_query(call.id, reply_text)
+        try:
+            bot.edit_message_text(
+                chat_id=call.message.chat.id, message_id=call.message.message_id,
+                text=f"🛡️ <b>TRAILING STOP ACTUALIZADO</b>\n\nNuevo Estado: <b>{new_status}</b>",
+                parse_mode="HTML"
+            )
+        except: pass
 
     # --- 3. BUCLE INFINITO (Polling) ---
     print("👂 Iniciando Polling de Telegram...")
